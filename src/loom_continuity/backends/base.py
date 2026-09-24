@@ -1,0 +1,16 @@
+"""Backend contracts only. Importing this module loads no HTTP client and no model weights."""
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class LLMBackend(Protocol):
+    async def generate(self, messages: list[dict], format: str | dict | None = None,
+                        options: dict | None = None, trace_id: str | None = None) -> str: ...
+
+
+class StatefulLLMBackend(LLMBackend, Protocol):
+    def prefill(self, tokens: list[int]): ...
+    def continue_from(self, state, tokens: list[int]): ...
+    def clone_state(self, state): ...
+    def commit_token(self, state, token_id: int): ...

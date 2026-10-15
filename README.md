@@ -130,6 +130,7 @@ if event is not None:
         queue.ack(event["event_id"])
     except Exception as e:
         queue.fail(event["event_id"], f"{type(e).__name__}: {e}")   # "pending" or "dead"
+        # a failure that will repeat (corrupt file, unknown schema): retry=False -> "dead" at once
 
 queue.list(status="dead")                       # the dead-letter list, with last_error
 ```
@@ -139,7 +140,8 @@ queue.list(status="dead")                       # the dead-letter list, with las
   Consumers must be idempotent.
 - **Retries.** `fail` returns the event after `base_backoff_s * 2^(attempt-1)`
   seconds. After `max_attempts` failures it is parked as `dead` with its last
-  error for a human to inspect.
+  error for a human to inspect. `fail(..., retry=False)` parks a permanent
+  failure (the same input will fail the same way) at once.
 - **No ordering.** A retried event can overtake a newer one.
 - **References, not payloads.** An event names where the data is (a blob
   path, a row id). The data itself stays in storage.

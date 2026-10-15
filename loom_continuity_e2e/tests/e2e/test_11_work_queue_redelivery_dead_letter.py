@@ -39,6 +39,12 @@ def main() -> bool:
         final_fail = queue.fail(job, "ValueError: corrupt pdf")
         dead = queue.list(status=EventStatus.DEAD)
 
+        permanent = queue.publish("job.ingest", {"blob": "raw/corrupt.pdf"})
+        claimed = queue.claim(["job.ingest"])
+        permanent_status = queue.fail(permanent, "FileDataError: corrupt", retry=False) \
+            if claimed and claimed["event_id"] == permanent else "not claimed"
+        permanent_row = next(e for e in queue.list(status=EventStatus.DEAD) if e["event_id"] == permanent)
+
         other = queue.claim(["job.other"])
         queue.ack(other["event_id"])
         done = queue.list(status=EventStatus.DONE)
@@ -46,7 +52,8 @@ def main() -> bool:
         print(f"died_attempt={died.stdout.strip()} rc={died.returncode} withheld={withheld} "
               f"redelivered_attempt={redelivered and redelivered['attempt']} first_fail={first_fail} "
               f"during_backoff={during_backoff} third_attempt={third and third['attempt']} final_fail={final_fail} "
-              f"dead={[(d['event_id'] == job, d['attempts'], d['last_error']) for d in dead]} done={len(done)}")
+              f"dead={[(d['event_id'] == job, d['attempts'], d['last_error']) for d in dead]} done={len(done)} "
+              f"permanent={permanent_status} after {permanent_row['attempts']} attempt(s)")
         return (
             died.stdout.strip() == "1" and died.returncode == 1
             and withheld is None
@@ -58,6 +65,7 @@ def main() -> bool:
             and final_fail == EventStatus.DEAD
             and len(dead) == 1 and dead[0]["event_id"] == job and dead[0]["last_error"] == "ValueError: corrupt pdf"
             and len(done) == 1 and done[0]["event_id"] == other["event_id"]
+            and permanent_status == EventStatus.DEAD and permanent_row["attempts"] == 1
         )
     finally:
         tmp.cleanup()

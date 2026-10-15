@@ -67,12 +67,17 @@ class SqliteEventQueue:
         with closing(self._connect()) as conn, conn:
             conn.execute("UPDATE events SET status = 'done', lease_until = NULL WHERE event_id = ?", (event_id,))
 
-    def fail(self, event_id: str, error: str) -> str:
+    def fail(self, event_id: str, error: str, retry: bool = True) -> str:
         """Back to "pending" after backoff (base * 2^(attempt-1)), or
-        "dead" once max_attempts are spent. Returns the new status."""
+        "dead" once max_attempts are spent. Returns the new status.
+
+        retry=False: the failure is permanent (a corrupt file, an event
+        schema the consumer does not know) -- the same input fails the same
+        way, so the event goes to the dead-letter state at once instead of
+        spending the remaining attempts."""
         with closing(self._connect()) as conn, conn:
             attempts = conn.execute("SELECT attempts FROM events WHERE event_id = ?", (event_id,)).fetchone()[0]
-            if attempts >= self.max_attempts:
+            if attempts >= self.max_attempts or not retry:
                 conn.execute("UPDATE events SET status = 'dead', last_error = ?, lease_until = NULL "
                              "WHERE event_id = ?", (error, event_id))
                 return EventStatus.DEAD

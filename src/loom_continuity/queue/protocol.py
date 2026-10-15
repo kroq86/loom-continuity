@@ -8,7 +8,8 @@ must tolerate:
                    idempotent (dedupe on event_id or on the payload's own key);
     no ordering    a retried event can overtake a newer one;
     retries        `fail` returns the event after backoff, until
-                   max attempts, then it is parked as "dead" with its error.
+                   max attempts, then it is parked as "dead" with its error;
+                   `fail(..., retry=False)` parks a permanent failure at once.
 """
 
 from typing import Protocol, runtime_checkable
@@ -25,4 +26,4 @@ class WorkQueue(Protocol):
 
     def ack(self, event_id: str) -> None: ...
 
-    def fail(self, event_id: str, error: str) -> str: ...
+    def fail(self, event_id: str, error: str, retry: bool = True) -> str: ...

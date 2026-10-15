@@ -3,3 +3,7 @@ dist/
 *.egg-info/
 __pycache__/
 *.py[cod]
+.venv/
+*.sqlite3
+*.tmp
+.env

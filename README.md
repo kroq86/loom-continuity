@@ -26,7 +26,7 @@ An agent tool can hide the protocol and return the current fact, or report `STAL
 
 The compute step can be a Python function. Nothing in the core requires a model.
 
-The distribution version is declared once, in `pyproject.toml`. This cut is `0.1.0`.
+The distribution version is declared once, in `pyproject.toml`.
 The base install has no FastAPI, torch, or model-runtime dependency.
 
 ## What it guarantees
@@ -53,7 +53,7 @@ The base install has no FastAPI, torch, or model-runtime dependency.
 
 ## Not in this cut
 
-v0.1 is one SQLite file and process coordination around it. It is not a city. These are outside the frozen contract:
+This is one SQLite file and process coordination around it. It is not a city. These are outside the frozen contract:
 
 - identity service
 - permissions
@@ -63,7 +63,7 @@ v0.1 is one SQLite file and process coordination around it. It is not a city. Th
 - a second storage backend
 - coordination across nodes
 
-`KnowledgeStore`, `Outbox`, and `RepairLeaseStore` are protocols with a SQLite implementation. Another backend is an open slot, not a delivered adapter. `scope` is a namespace string, not an identity. Lease TTL is an expiry, not a scheduler.
+`KnowledgeStore`, `Outbox`, `RepairLeaseStore`, and `WorkQueue` are protocols with a SQLite implementation. Another backend is an open slot, not a delivered adapter. `scope` is a namespace string, not an identity. Lease TTL is an expiry, not a scheduler.
 
 ## `scope`
 
@@ -95,6 +95,10 @@ from loom_continuity import (
     Lease,
     ClaimStatus,
     ClaimResult,
+    WorkQueue,
+    SqliteEventQueue,
+    ClaimedEvent,
+    EventStatus,
     LLMBackend,
     StatefulLLMBackend,
 )
@@ -105,6 +109,42 @@ from loom_continuity import (
 `Lease` is the only lease value type. `claim` returns `ClaimStatus.DENIED` and does not raise.
 `commit_fact_with_event` and `commit_fact_with_event_if_versions_match` are the public atomic write and conditional-commit operations. They are not private helpers.
 `LLMBackend` and `StatefulLLMBackend` are dependency-free call contracts. Model runtimes are not part of the base package.
+
+## Work queue
+
+The outbox says "this fact changed". The work queue says "do this job":
+an upload to ingest, a document to re-embed, a report to build. It has the
+same crash model: one SQLite file shared by the processes that publish
+and the workers that consume.
+
+```python
+from loom_continuity import SqliteEventQueue
+
+queue = SqliteEventQueue("state.sqlite3", max_attempts=3, lease_s=60, base_backoff_s=1)
+queue.publish("document.uploaded", {"blob": "raw/2026/report.pdf", "tenant": "t1"}, correlation_id=trace_id)
+
+event = queue.claim(["document.uploaded"])      # None when nothing is ready
+if event is not None:
+    try:
+        ingest(event["payload"])                # must be idempotent
+        queue.ack(event["event_id"])
+    except Exception as e:
+        queue.fail(event["event_id"], f"{type(e).__name__}: {e}")   # "pending" or "dead"
+
+queue.list(status="dead")                       # the dead-letter list, with last_error
+```
+
+- **At-least-once.** A worker that dies after `claim` loses its lease. Once
+  the lease expires, another worker claims the same event with `attempt == 2`.
+  Consumers must be idempotent.
+- **Retries.** `fail` returns the event after `base_backoff_s * 2^(attempt-1)`
+  seconds. After `max_attempts` failures it is parked as `dead` with its last
+  error for a human to inspect.
+- **No ordering.** A retried event can overtake a newer one.
+- **References, not payloads.** An event names where the data is (a blob
+  path, a row id). The data itself stays in storage.
+- `schema_version` travels with every event, so a consumer can refuse a
+  version it does not understand instead of misreading it.
 
 ## Current-State Notification Semantics
 

@@ -1,4 +1,4 @@
-"""Proofs that travel with the package, not with ticket_harness."""
+"""Proofs that travel with the package."""
 import sys
 import tempfile
 import unittest
@@ -26,6 +26,10 @@ PUBLIC_API = {
     "ClaimResult",
     "RepairLeaseStore",
     "SqliteRepairLease",
+    "WorkQueue",
+    "SqliteEventQueue",
+    "ClaimedEvent",
+    "EventStatus",
 }
 
 

@@ -1,6 +1,6 @@
 """External-style consumer. Run from an environment where loom-continuity is installed.
 
-Does not import ticket_harness, FastAPI, Ollama, or Qwen.
+Depends on nothing but loom_continuity and the standard library.
 """
 import tempfile
 from pathlib import Path

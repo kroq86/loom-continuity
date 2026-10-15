@@ -1,6 +1,6 @@
 """End-to-end run of Loom Continuity.
 
-Lives outside the package and outside ticket_harness tests. Uses only
+Lives outside the package and its tests. Uses only
 loom_continuity: no FastAPI, Ollama, or Qwen.
 
     python loom_continuity_e2e/run.py

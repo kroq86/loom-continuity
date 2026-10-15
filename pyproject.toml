@@ -1,13 +1,32 @@
 [project]
 name = "loom-continuity"
-version = "0.1.0"
-description = "Runtime for durable derived knowledge: versioned results with evidence, staleness, safe recomputation across processes, and crash-safe notification."
+version = "0.2.0"
+description = "Runtime for durable derived knowledge: versioned results with evidence, staleness, safe recomputation across processes, crash-safe notification, and an at-least-once work queue."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+authors = [{ name = "KirillOstapenko", email = "djkroq@gmail.com" }]
+keywords = ["durable", "outbox", "lease", "provenance", "work-queue", "dead-letter", "sqlite", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: System :: Distributed Computing",
+]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/kroq86/loom-continuity"
+Repository = "https://github.com/kroq86/loom-continuity"
+Issues = "https://github.com/kroq86/loom-continuity/issues"
+
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

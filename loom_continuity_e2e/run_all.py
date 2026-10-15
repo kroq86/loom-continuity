@@ -1,4 +1,4 @@
-"""Run the ten continuity scenarios against the installed loom-continuity package."""
+"""Run the continuity scenarios against the installed loom-continuity package."""
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +17,7 @@ NAMES = [
     "test_08_at_least_once_idempotency.py",
     "test_09_reverse_delivery_current_state.py",
     "test_10_full_continuity.py",
+    "test_11_work_queue_redelivery_dead_letter.py",
 ]
 
 

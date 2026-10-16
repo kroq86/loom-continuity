@@ -37,6 +37,7 @@ The base install has no FastAPI, torch, or model-runtime dependency.
 - If `A -> B -> C` and `A` changes, `C` is stale even when `B`'s revision number has not changed.
 - The store does not repair itself. A caller claims a per-scope, per-key lease, computes outside any database transaction, and commits only if the dependency versions still match.
 - A lease expires. After the owner process dies, another worker can acquire it. The lease is not held as a long transaction across the computation.
+- The work queue hands out a `claim_token` with every claim (a fencing token: it grows on each claim of the event). A worker heartbeats with `renew(event_id, claim_token)` while it works; `ack` and `fail` given the token act only while that claim is current. A worker whose lease expired, and whose event was claimed again, gets `False` / `lease_lost` and changes nothing. Without a token, `ack`/`fail` behave as before 0.4 (unconditional).
 - A repair computed against old dependency versions is rejected. That result never becomes the current committed value.
 - A fact revision and its outbox obligation commit in one transaction. A crash after commit leaves both. A crash before commit leaves neither.
 - Delivery is at-least-once. Pending events remain until the consumer returns.

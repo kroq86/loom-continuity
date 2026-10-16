@@ -18,6 +18,7 @@ NAMES = [
     "test_09_reverse_delivery_current_state.py",
     "test_10_full_continuity.py",
     "test_11_work_queue_redelivery_dead_letter.py",
+    "test_12_lease_ownership.py",
 ]
 
 

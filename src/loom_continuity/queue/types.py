@@ -13,6 +13,7 @@ class EventStatus(StrEnum):
     PROCESSING = "processing"
     DONE = "done"
     DEAD = "dead"
+    LEASE_LOST = "lease_lost"  # returned by fail/ack with a claim token that is no longer current
 
 
 class ClaimedEvent(TypedDict):
@@ -22,3 +23,8 @@ class ClaimedEvent(TypedDict):
     payload: dict[str, Any]
     correlation_id: str | None
     attempt: int  # 1 on first delivery, 2+ on redelivery
+    # Fencing token of this claim: increases on every claim of the event.
+    # renew/ack/fail with it succeed only while this claim is the current
+    # one -- a worker whose lease expired (and the event was claimed again)
+    # cannot extend, complete or fail the newer claim.
+    claim_token: int

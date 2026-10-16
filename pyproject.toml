@@ -1,6 +1,6 @@
 [project]
 name = "loom-continuity"
-version = "0.3.0"
+version = "0.4.0"
 description = "Runtime for durable derived knowledge: versioned results with evidence, staleness, safe recomputation across processes, crash-safe notification, and an at-least-once work queue."
 readme = "README.md"
 license = "MIT"

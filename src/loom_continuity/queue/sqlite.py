@@ -27,6 +27,8 @@ class SqliteEventQueue:
                 payload TEXT NOT NULL, correlation_id TEXT, created_at TEXT NOT NULL,
                 status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
                 available_at REAL NOT NULL, lease_until REAL, last_error TEXT)""")
+            if "claim_token" not in {r[1] for r in conn.execute("PRAGMA table_info(events)")}:
+                conn.execute("ALTER TABLE events ADD COLUMN claim_token INTEGER NOT NULL DEFAULT 0")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path, timeout=10)
@@ -50,41 +52,79 @@ class SqliteEventQueue:
             conn.isolation_level = None
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                f"SELECT event_id, type, schema_version, payload, correlation_id, attempts FROM events "
+                f"SELECT event_id, type, schema_version, payload, correlation_id, attempts, claim_token FROM events "
                 f"WHERE type IN ({marks}) AND ((status = 'pending' AND available_at <= ?) "
                 f"OR (status = 'processing' AND lease_until < ?)) ORDER BY available_at LIMIT 1",
                 (*types, now, now)).fetchone()
             if row is None:
                 conn.execute("COMMIT")
                 return None
-            conn.execute("UPDATE events SET status = 'processing', attempts = attempts + 1, lease_until = ? "
-                         "WHERE event_id = ?", (now + self.lease_s, row[0]))
+            conn.execute("UPDATE events SET status = 'processing', attempts = attempts + 1, lease_until = ?, "
+                         "claim_token = claim_token + 1 WHERE event_id = ?", (now + self.lease_s, row[0]))
             conn.execute("COMMIT")
         return ClaimedEvent(event_id=row[0], type=row[1], schema_version=row[2], payload=json.loads(row[3]),
-                            correlation_id=row[4], attempt=row[5] + 1)
+                            correlation_id=row[4], attempt=row[5] + 1, claim_token=row[6] + 1)
 
-    def ack(self, event_id: str) -> None:
+    def renew(self, event_id: str, claim_token: int, lease_s: float | None = None) -> bool:
+        """Extend this claim's lease (a heartbeat while the work runs). False:
+        the claim is no longer current (the lease expired and the event was
+        claimed again, or it was completed) -- stop and do not ack."""
         with closing(self._connect()) as conn, conn:
-            conn.execute("UPDATE events SET status = 'done', lease_until = NULL WHERE event_id = ?", (event_id,))
+            cur = conn.execute("UPDATE events SET lease_until = ? WHERE event_id = ? AND claim_token = ? "
+                               "AND status = 'processing'",
+                               (time.time() + (lease_s or self.lease_s), event_id, claim_token))
+            return cur.rowcount == 1
 
-    def fail(self, event_id: str, error: str, retry: bool = True) -> str:
+    def ack(self, event_id: str, claim_token: int | None = None) -> bool:
+        """Done. With claim_token: only if this claim is still current (else
+        False, nothing changes). Without: unconditional (the pre-0.4
+        behaviour; a worker whose lease expired could complete a newer
+        claim)."""
+        with closing(self._connect()) as conn, conn:
+            if claim_token is None:
+                conn.execute("UPDATE events SET status = 'done', lease_until = NULL WHERE event_id = ?", (event_id,))
+                return True
+            cur = conn.execute("UPDATE events SET status = 'done', lease_until = NULL WHERE event_id = ? "
+                               "AND claim_token = ? AND status = 'processing'", (event_id, claim_token))
+            return cur.rowcount == 1
+
+    def fail(self, event_id: str, error: str, retry: bool = True, claim_token: int | None = None) -> str:
         """Back to "pending" after backoff (base * 2^(attempt-1)), or
         "dead" once max_attempts are spent. Returns the new status.
 
         retry=False: the failure is permanent (a corrupt file, an event
         schema the consumer does not know) -- the same input fails the same
         way, so the event goes to the dead-letter state at once instead of
-        spending the remaining attempts."""
-        with closing(self._connect()) as conn, conn:
-            attempts = conn.execute("SELECT attempts FROM events WHERE event_id = ?", (event_id,)).fetchone()[0]
-            if attempts >= self.max_attempts or not retry:
-                conn.execute("UPDATE events SET status = 'dead', last_error = ?, lease_until = NULL "
-                             "WHERE event_id = ?", (error, event_id))
-                return EventStatus.DEAD
-            conn.execute("UPDATE events SET status = 'pending', last_error = ?, lease_until = NULL, "
-                         "available_at = ? WHERE event_id = ?",
-                         (error, time.time() + self.base_backoff_s * 2 ** (attempts - 1), event_id))
-            return EventStatus.PENDING
+        spending the remaining attempts.
+
+        claim_token: only if this claim is still current; else nothing
+        changes and EventStatus.LEASE_LOST is returned. One transaction:
+        the check and the update cannot be split by another claim."""
+        with closing(self._connect()) as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                status = self._fail(conn, event_id, error, retry, claim_token)
+                conn.execute("COMMIT")
+                return status
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+
+    def _fail(self, conn: sqlite3.Connection, event_id: str, error: str, retry: bool,
+              claim_token: int | None) -> str:
+        attempts, token, status = conn.execute("SELECT attempts, claim_token, status FROM events WHERE event_id = ?",
+                                               (event_id,)).fetchone()
+        if claim_token is not None and (token != claim_token or status != EventStatus.PROCESSING):
+            return EventStatus.LEASE_LOST
+        if attempts >= self.max_attempts or not retry:
+            conn.execute("UPDATE events SET status = 'dead', last_error = ?, lease_until = NULL "
+                         "WHERE event_id = ?", (error, event_id))
+            return EventStatus.DEAD
+        conn.execute("UPDATE events SET status = 'pending', last_error = ?, lease_until = NULL, "
+                     "available_at = ? WHERE event_id = ?",
+                     (error, time.time() + self.base_backoff_s * 2 ** (attempts - 1), event_id))
+        return EventStatus.PENDING
 
     def list(self, status: str | None = None, limit: int = 50, after: str | None = None) -> list[dict]:
         """Events oldest first, for inspection (e.g. the dead-letter list).

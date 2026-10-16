@@ -9,7 +9,11 @@ must tolerate:
     no ordering    a retried event can overtake a newer one;
     retries        `fail` returns the event after backoff, until
                    max attempts, then it is parked as "dead" with its error;
-                   `fail(..., retry=False)` parks a permanent failure at once.
+                   `fail(..., retry=False)` parks a permanent failure at once;
+    ownership      every claim gets a higher `claim_token` (fencing token);
+                   `renew` (heartbeat), `ack` and `fail` given the token act
+                   only while that claim is current -- a worker whose lease
+                   expired cannot extend, complete or fail the newer claim.
 """
 
 from typing import Protocol, runtime_checkable
@@ -24,6 +28,8 @@ class WorkQueue(Protocol):
 
     def claim(self, types: list[str]) -> ClaimedEvent | None: ...
 
-    def ack(self, event_id: str) -> None: ...
+    def renew(self, event_id: str, claim_token: int, lease_s: float | None = None) -> bool: ...
 
-    def fail(self, event_id: str, error: str, retry: bool = True) -> str: ...
+    def ack(self, event_id: str, claim_token: int | None = None) -> bool: ...
+
+    def fail(self, event_id: str, error: str, retry: bool = True, claim_token: int | None = None) -> str: ...

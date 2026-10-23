@@ -42,6 +42,11 @@ class SqliteKnowledgeStore:
         owns_conn = _conn is None
         conn = _conn if _conn is not None else sqlite3.connect(self.db_path)
         try:
+            # Reading MAX(version) and inserting version+1 must be one write
+            # transaction: two concurrent writers of the same key otherwise read
+            # the same MAX and the second insert fails on the primary key.
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT MAX(version) FROM facts WHERE scope = ? AND key = ?",
                 (scope, key),
@@ -85,6 +90,17 @@ class SqliteKnowledgeStore:
                 (scope, key),
             ).fetchall()
         return [self._row_to_fact(row) for row in rows]
+
+    def delete_scope(self, scope: str) -> int:
+        """Erase every revision of every key in `scope`; the number of rows removed.
+
+        The one exception to append-only history: erasure on request (for
+        example a user's right to be forgotten) must not leave old revisions.
+        """
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            # Without secure_delete the erased values stay readable in the file's free pages.
+            conn.execute("PRAGMA secure_delete = ON")
+            return conn.execute("DELETE FROM facts WHERE scope = ?", (scope,)).rowcount
 
     def get_current_facts(self, scope: str) -> list[FactRevision]:
         """The current revision of every key in `scope`, ordered by key."""

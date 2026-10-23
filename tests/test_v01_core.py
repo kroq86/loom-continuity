@@ -88,6 +88,44 @@ class MemoryTest(unittest.TestCase):
                              [("plan", "Core", 1), ("provider", "Stripe", 2)])
             self.assertEqual(memory.get_current_facts("missing"), [])
 
+    def test_concurrent_writers_of_one_key_both_get_a_version(self):
+        import threading
+        from loom_continuity import SqliteKnowledgeStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            memory = SqliteKnowledgeStore(str(Path(tmp) / "m.sqlite3"))
+            errors = []
+            for i in range(50):
+                barrier = threading.Barrier(2)
+
+                def write(value, key=f"k{i}", barrier=barrier):
+                    barrier.wait()
+                    try:
+                        memory.put_fact("s", key, value, "w", [])
+                    except Exception as e:  # noqa: BLE001 -- the test counts any lost write
+                        errors.append(e)
+
+                threads = [threading.Thread(target=write, args=(v,)) for v in ("a", "b")]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+            self.assertEqual(errors, [])
+            self.assertEqual({len(memory.get_revisions("s", f"k{i}")) for i in range(50)}, {2})
+
+    def test_delete_scope_erases_every_revision_of_that_scope_only(self):
+        from loom_continuity import SqliteKnowledgeStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            memory = SqliteKnowledgeStore(str(Path(tmp) / "m.sqlite3"))
+            memory.put_fact("a", "provider", "PayPal", "s1", [])
+            memory.put_fact("a", "provider", "Stripe", "s2", [])
+            memory.put_fact("b", "plan", "Free", "s1", [])
+            self.assertEqual(memory.delete_scope("a"), 2)
+            self.assertEqual(memory.get_revisions("a", "provider"), [])
+            self.assertNotIn(b"PayPal", (Path(tmp) / "m.sqlite3").read_bytes(), "erased values stay in free pages")
+            self.assertEqual([f.value for f in memory.get_current_facts("b")], ["Free"])
+
 
 class OutboxTest(unittest.TestCase):
     def test_sqlite_adapter_satisfies_outbox_protocol(self):

@@ -86,6 +86,17 @@ class SqliteKnowledgeStore:
             ).fetchall()
         return [self._row_to_fact(row) for row in rows]
 
+    def get_current_facts(self, scope: str) -> list[FactRevision]:
+        """The current revision of every key in `scope`, ordered by key."""
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            rows = conn.execute(
+                "SELECT key, value, source_step, provenance, status, created_at, version FROM facts f "
+                "WHERE scope = ? AND version = (SELECT MAX(version) FROM facts WHERE scope = f.scope AND key = f.key) "
+                "ORDER BY key",
+                (scope,),
+            ).fetchall()
+        return [self._row_to_fact(row) for row in rows]
+
     def get_current_version(self, scope: str, key: str) -> int | None:
         with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute(

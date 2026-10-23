@@ -74,6 +74,20 @@ class MemoryTest(unittest.TestCase):
             self.assertEqual(lookup.status, "STALE")
             self.assertEqual(lookup.fact.value, "monitor")
 
+    def test_current_facts_are_the_latest_revision_per_key_within_one_scope(self):
+        from loom_continuity import SqliteKnowledgeStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            memory = SqliteKnowledgeStore(str(Path(tmp) / "m.sqlite3"))
+            memory.put_fact("a", "provider", "PayPal", "s1", [])
+            memory.put_fact("a", "provider", "Stripe", "s2", [])
+            memory.put_fact("a", "plan", "Core", "s1", [])
+            memory.put_fact("b", "plan", "Free", "s1", [])
+            current = memory.get_current_facts("a")
+            self.assertEqual([(f.key, f.value, f.version) for f in current],
+                             [("plan", "Core", 1), ("provider", "Stripe", 2)])
+            self.assertEqual(memory.get_current_facts("missing"), [])
+
 
 class OutboxTest(unittest.TestCase):
     def test_sqlite_adapter_satisfies_outbox_protocol(self):
